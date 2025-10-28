@@ -279,127 +279,97 @@ def persist_users(): save_json(USERS_FILE, users)
 def persist_renew_mode(): save_json(RENEW_MODE_FILE, renew_mode)
 def persist_giveaways(): save_json(GIVEAWAY_FILE, giveaways)
 
-async def send_log(action, user, target_user=None, container_id=None, details="", points_change=0, duration=None):
-    """Send professional logs to the log channel"""
+async def send_log(action: str, user, details: str = "", vps_id: str = ""):
+    """Send professional log embed to log channel"""
     if not LOG_CHANNEL_ID:
         return
     
     try:
         channel = bot.get_channel(LOG_CHANNEL_ID)
         if not channel:
+            print(f"Log channel {LOG_CHANNEL_ID} not found")
             return
         
-        # Color coding based on action type
+        # Determine color based on action type
         color_map = {
-            "VPS Created": 0x00ff00,  # Green
-            "VPS Deployed": 0x00ff00,  # Green
-            "VPS Started": 0x00ff00,   # Green
-            "VPS Restarted": 0x0099ff, # Blue
-            "VPS Stopped": 0xff9900,   # Orange
-            "VPS Removed": 0xff0000,   # Red
-            "VPS Suspended": 0xff0000, # Red
-            "VPS Unsuspended": 0x00ff00, # Green
-            "VPS Renewed": 0x0099ff,   # Blue
-            "VPS Reinstalled": 0x9b59b6, # Purple
-            "SSH Reset": 0x3498db,     # Light Blue
-            "Port Added": 0xe67e22,    # Orange
-            "Admin Added": 0x2ecc71,   # Green
-            "Admin Removed": 0xe74c3c, # Red
-            "Points Given": 0xf1c40f,  # Yellow
-            "Points Removed": 0xe74c3c, # Red
-            "Invites Claimed": 0x9b59b6, # Purple
-            "VPS Shared": 0x3498db,    # Light Blue
-            "Share Removed": 0xe74c3c, # Red
-            "Mass Port Add": 0xe67e22, # Orange
+            "deploy": discord.Color.green(),
+            "remove": discord.Color.orange(),
+            "renew": discord.Color.blue(),
+            "suspend": discord.Color.red(),
+            "unsuspend": discord.Color.green(),
+            "start": discord.Color.green(),
+            "stop": discord.Color.orange(),
+            "restart": discord.Color.blue(),
+            "share": discord.Color.purple(),
+            "admin": discord.Color.gold(),
+            "points": discord.Color.teal(),
+            "invite": discord.Color.magenta(),
+            "error": discord.Color.red()
         }
         
-        color = color_map.get(action, 0x95a5a6)  # Default gray
+        # Get appropriate color
+        action_lower = action.lower()
+        color = discord.Color.blue()  # default
+        for key, value in color_map.items():
+            if key in action_lower:
+                color = value
+                break
         
-        # Create professional embed
+        # Create embed
         embed = discord.Embed(
             title=f"📊 {action}",
             color=color,
             timestamp=datetime.utcnow()
         )
         
-        # User information
+        # Add user info
+        if hasattr(user, 'mention'):
+            embed.add_field(name="👤 User", value=f"{user.mention}\n`{user.name}`", inline=True)
+        else:
+            embed.add_field(name="👤 User", value=f"`{user}`", inline=True)
+        
+        # Add VPS ID if provided
+        if vps_id:
+            embed.add_field(name="🆔 VPS ID", value=f"`{vps_id}`", inline=True)
+        
+        # Add details
+        if details:
+            embed.add_field(name="📝 Details", value=details[:1024], inline=False)
+        
+        # Add timestamp field
         embed.add_field(
-            name="👤 Action By",
-            value=f"{user.mention}\n`{user.name}`\nID: `{user.id}`",
+            name="⏰ Time", 
+            value=f"<t:{int(datetime.utcnow().timestamp())}:R>", 
             inline=True
         )
         
-        # Target user (if applicable)
-        if target_user:
-            embed.add_field(
-                name="🎯 Target User",
-                value=f"{target_user.mention}\n`{target_user.name}`\nID: `{target_user.id}`",
-                inline=True
-            )
-        
-        # Container information
-        if container_id:
-            embed.add_field(
-                name="🆔 Container ID",
-                value=f"`{container_id}`",
-                inline=True
-            )
-            
-            # Add VPS specs if available
-            vps = vps_db.get(container_id)
-            if vps:
-                embed.add_field(
-                    name="💻 VPS Specs",
-                    value=f"RAM: `{vps['ram']}GB`\nCPU: `{vps['cpu']}`\nDisk: `{vps['disk']}GB`",
-                    inline=True
-                )
-        
-        # Points changes
-        if points_change != 0:
-            emoji = "🟢" if points_change > 0 else "🔴"
-            embed.add_field(
-                name="💰 Points Change",
-                value=f"{emoji} `{points_change:+d} points`",
-                inline=True
-            )
-        
-        # Duration information
-        if duration:
-            embed.add_field(
-                name="⏰ Duration",
-                value=f"`{duration}`",
-                inline=True
-            )
-        
-        # Additional details
-        if details:
-            embed.add_field(
-                name="📝 Details",
-                value=details,
-                inline=False
-            )
-        
-        # Footer with action type
-        action_emoji = {
-            "VPS Created": "🚀",
-            "VPS Deployed": "🚀", 
-            "VPS Started": "🟢",
-            "VPS Stopped": "🔴",
-            "VPS Removed": "🗑️",
-            "VPS Renewed": "🔄",
-            "Admin Added": "🛡️",
-            "Points Given": "💰"
-        }
-        
-        embed.set_footer(
-            text=f"{action_emoji.get(action, '📊')} VPS Management System",
-            icon_url=user.display_avatar.url
-        )
+        # Set footer
+        embed.set_footer(text="VPS Activity Log")
         
         await channel.send(embed=embed)
         
+        # Also save to JSON file for /logs command
+        logs_file = os.path.join(DATA_DIR, "vps_logs.json")
+        logs_data = load_json(logs_file, [])
+        
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "action": action,
+            "user": user.name if hasattr(user, 'name') else str(user),
+            "details": details,
+            "vps_id": vps_id
+        }
+        
+        logs_data.append(log_entry)
+        
+        # Keep only last 1000 logs to prevent file from growing too large
+        if len(logs_data) > 1000:
+            logs_data = logs_data[-1000:]
+        
+        save_json(logs_file, logs_data)
+        
     except Exception as e:
-        logger.error(f"Failed to send log: {e}")
+        print(f"Failed to send log: {e}")
 
 async def create_vps(owner_id, ram=DEFAULT_RAM_GB, cpu=DEFAULT_CPU, disk=DEFAULT_DISK_GB, paid=False, giveaway=False):
     uid = str(owner_id)
@@ -1045,25 +1015,33 @@ class GiveawayView(discord.ui.View):
 
 @bot.tree.command(name="deploy", description="Deploy a VPS (cost 4 points)")
 async def deploy(interaction: discord.Interaction):
-    """Deploy a new VPS - Points deducted only after successful creation"""
+    """Deploy a new VPS - Points required before deployment"""
     uid = str(interaction.user.id)
     if uid not in users: 
         users[uid] = {"points": 0, "inv_unclaimed": 0, "inv_total": 0}
         persist_users()
     
-    # Check points but don't block deployment
+    # Check points and BLOCK deployment if not enough
     has_enough_points = users[uid]['points'] >= POINTS_PER_DEPLOY
     is_admin = interaction.user.id in ADMIN_IDS
+    
+    # If user doesn't have enough points and is not admin, BLOCK deployment
+    if not has_enough_points and not is_admin:
+        await interaction.response.send_message(
+            f"❌ You need {POINTS_PER_DEPLOY} points to deploy a VPS. You only have {users[uid]['points']} points.\n\n"
+            f"**Ways to earn points:**\n"
+            f"• Use `/invite` to get invite links\n"
+            f"• Ask friends to join using your invite code\n"
+            f"• Wait for daily point resets\n"
+            f"• Participate in giveaways",
+            ephemeral=True
+        )
+        return
+    
     original_points = users[uid]['points']
     
     # Send initial response based on points status
-    if not has_enough_points and not is_admin:
-        await interaction.response.send_message(
-            f"⚠️ You need {POINTS_PER_DEPLOY} points to deploy. You have {users[uid]['points']} points. "
-            f"But don't worry, we'll proceed with deployment anyway! Points will be deducted after successful creation.", 
-            ephemeral=True
-        )
-    elif not is_admin:
+    if not is_admin:
         await interaction.response.send_message(
             f"✅ You have enough points! Deploying VPS... (Cost: {POINTS_PER_DEPLOY} points)", 
             ephemeral=True
@@ -1085,9 +1063,11 @@ async def deploy(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error creating VPS: {rec['error']}", ephemeral=True)
         return
     
-    # Only deduct points after successful VPS creation
+    # Deduct points after successful VPS creation (only if not admin)
+    points_deducted = 0
     if not is_admin:
         users[uid]['points'] -= POINTS_PER_DEPLOY
+        points_deducted = POINTS_PER_DEPLOY
         persist_users()
     
     systemctl_status = "✅ Working" if rec.get('systemctl_working') else "⚠️ Limited"
@@ -1104,8 +1084,6 @@ async def deploy(interaction: discord.Interaction):
     if not is_admin:
         embed.add_field(name="Points Deducted", value=f"{-POINTS_PER_DEPLOY} points", inline=True)
         embed.add_field(name="Remaining Points", value=f"{users[uid]['points']} points", inline=True)
-        if not has_enough_points:
-            embed.add_field(name="Note", value="You deployed with insufficient points. Please earn more points for future deployments!", inline=False)
     
     try: 
         await interaction.user.send(embed=embed)
@@ -1118,6 +1096,14 @@ async def deploy(interaction: discord.Interaction):
         if not is_admin:
             followup_msg += f"\n📊 Points: {original_points} → {users[uid]['points']} (-{POINTS_PER_DEPLOY})"
         await interaction.followup.send(followup_msg, embed=embed, ephemeral=True)
+    
+    # Send log
+    await send_log(
+        "VPS Deployed", 
+        interaction.user, 
+        details=f"New VPS created with {rec['ram']}GB RAM, {rec['cpu']} CPU, {rec['disk']}GB Disk",
+        vps_id=rec['container_id']
+    )
 
 @bot.tree.command(name="list", description="List your VPS")
 async def list_vps(interaction: discord.Interaction):
@@ -1157,10 +1143,10 @@ async def list_vps(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="remove", description="Remove your VPS and refund points")
+@bot.tree.command(name="remove", description="Remove your VPS and get half points refund")
 @app_commands.describe(container_id="Container ID to remove")
 async def remove_vps(interaction: discord.Interaction, container_id: str):
-    """Remove a VPS and get points refunded"""
+    """Remove a VPS and get half points refunded"""
     cid = container_id.strip()
     rec = vps_db.get(cid)
     if not rec:
@@ -1172,22 +1158,70 @@ async def remove_vps(interaction: discord.Interaction, container_id: str):
         await interaction.response.send_message("❌ You don't have permission to remove this VPS.", ephemeral=True)
         return
     
-    await interaction.response.defer(ephemeral=True)
+    # Send warning message first
+    refund_amount = POINTS_PER_DEPLOY // 2  # Half points refund
+    warning_msg = (
+        f"⚠️ **Warning: You are about to remove VPS `{cid}`**\n\n"
+        f"• Only **{refund_amount} points** will be refunded (half of deployment cost)\n"
+        f"• Your current balance: **{users.get(uid, {}).get('points', 0)} points**\n"
+        f"• After refund: **{users.get(uid, {}).get('points', 0) + refund_amount} points**\n\n"
+        f"**Are you sure you want to proceed?**"
+    )
+    
+    # Create a confirmation view
+    class ConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=30.0)
+            self.value = None
+        
+        @discord.ui.button(label='Confirm Remove', style=discord.ButtonStyle.danger)
+        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.value = True
+            self.stop()
+            await interaction.response.defer()
+        
+        @discord.ui.button(label='Cancel', style=discord.ButtonStyle.secondary)
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.value = False
+            self.stop()
+            await interaction.response.send_message("✅ Removal cancelled.", ephemeral=True)
+    
+    view = ConfirmView()
+    await interaction.response.send_message(warning_msg, view=view, ephemeral=True)
+    
+    # Wait for user response
+    await view.wait()
+    
+    if view.value is None:
+        await interaction.followup.send("⏰ Removal timed out. Please try again.", ephemeral=True)
+        return
+    elif not view.value:
+        return  # User cancelled
+    
+    # Proceed with removal
+    await interaction.followup.send("🔄 Removing VPS...", ephemeral=True)
     
     success = await docker_remove_container(cid)
     if not success:
         await interaction.followup.send("⚠️ Failed to remove container. It might already be removed.", ephemeral=True)
+        return
     
-    # Refund points only if user owns it and is not admin
+    # Refund half points only if user owns it and is not admin
+    refund_given = False
     if rec['owner'] == uid and interaction.user.id not in ADMIN_IDS and not rec.get('giveaway_vps', False):
-        users[uid]['points'] += POINTS_PER_DEPLOY
+        users[uid]['points'] += refund_amount
         persist_users()
+        refund_given = True
     
     vps_db.pop(cid, None)
     persist_vps()
     await send_log("VPS Removed", interaction.user, cid)
     
-    await interaction.followup.send(f"✅ VPS `{cid}` removed successfully." + (" Points refunded." if not rec.get('giveaway_vps', False) else ""), ephemeral=True)
+    result_msg = f"✅ VPS `{cid}` removed successfully."
+    if refund_given:
+        result_msg += f" Refunded {refund_amount} points (half of deployment cost)."
+    
+    await interaction.followup.send(result_msg, ephemeral=True)
 
 @bot.tree.command(name="manage", description="Interactive panel for VPS management")
 @app_commands.describe(container_id="Container ID to manage")
@@ -1701,7 +1735,7 @@ async def set_log_channel(interaction: discord.Interaction, channel: discord.Tex
 
 # ============ ADD /logs COMMAND RIGHT HERE ============
 @bot.tree.command(name="logs", description="[ADMIN] View recent VPS activities")
-@app_commands.describe(limit="Number of logs to show (default: 10)")
+@app_commands.describe(limit="Number of logs to show (default: 10, max: 25)")
 async def view_logs(interaction: discord.Interaction, limit: int = 10):
     """[ADMIN] View recent VPS activity logs"""
     if interaction.user.id not in ADMIN_IDS:
@@ -1713,13 +1747,31 @@ async def view_logs(interaction: discord.Interaction, limit: int = 10):
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
-    if limit > 20:
-        limit = 20
+    if limit > 25:
+        limit = 25
+    if limit < 1:
+        limit = 10
+    
+    # Load logs
+    logs_file = os.path.join(DATA_DIR, "vps_logs.json")
+    logs_data = load_json(logs_file, [])
+    
+    if not logs_data:
+        embed = discord.Embed(
+            title="📊 VPS Activity Logs",
+            description="No logs found yet. Activities will appear here once they occur.",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Get recent logs
+    recent_logs = list(reversed(logs_data[-limit:]))
     
     # Create logs overview embed
     embed = discord.Embed(
-        title="📊 VPS Activity Logs Overview",
-        description=f"Showing last **{limit}** activities",
+        title="📊 VPS Activity Logs",
+        description=f"Showing last **{len(recent_logs)}** activities",
         color=discord.Color.blue(),
         timestamp=datetime.utcnow()
     )
@@ -1728,12 +1780,47 @@ async def view_logs(interaction: discord.Interaction, limit: int = 10):
     total_vps = len(vps_db)
     active_vps = len([v for v in vps_db.values() if v['active']])
     suspended_vps = len([v for v in vps_db.values() if v.get('suspended', False)])
+    total_users = len(users)
     
     embed.add_field(
         name="📈 Current Statistics",
-        value=f"```\n🏠 Total VPS: {total_vps}\n🟢 Active: {active_vps}\n⏸️ Suspended: {suspended_vps}\n👥 Total Users: {len(users)}\n```",
+        value=f"```\n🏠 Total VPS: {total_vps}\n🟢 Active: {active_vps}\n⏸️ Suspended: {suspended_vps}\n👥 Total Users: {total_users}\n```",
         inline=False
     )
+    
+    # Add recent activities
+    activities_text = ""
+    for i, log in enumerate(recent_logs, 1):
+        timestamp = log.get('timestamp', 'Unknown')
+        action = log.get('action', 'Unknown')
+        user = log.get('user', 'Unknown')
+        details = log.get('details', '')
+        
+        # Format timestamp nicely
+        try:
+            if isinstance(timestamp, str) and timestamp != 'Unknown':
+                time_display = f"<t:{int(datetime.fromisoformat(timestamp.replace('Z', '+00:00')).timestamp())}:R>"
+            else:
+                time_display = "Recently"
+        except:
+            time_display = "Recently"
+        
+        # Truncate long details
+        if len(details) > 50:
+            details = details[:47] + "..."
+        
+        activities_text += f"**{i}. {action}**\n"
+        activities_text += f"👤 `{user}` • ⏰ {time_display}\n"
+        if details:
+            activities_text += f"📝 `{details}`\n"
+        activities_text += "\n"
+    
+    if activities_text:
+        embed.add_field(
+            name="🔄 Recent Activities",
+            value=activities_text[:1024] if len(activities_text) > 1024 else activities_text,
+            inline=False
+        )
     
     embed.add_field(
         name="🔧 Quick Actions",
